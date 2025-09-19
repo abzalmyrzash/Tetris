@@ -90,7 +90,7 @@ int main() {
 		if ((clock() - lastFall) / CLOCKS_PER_MSEC >= fallTime) {
 			lastFall = clock();
 			moveResult = movePiece(DOWN, &game);
-			if (moveResult == 1 || moveResult == -1) moveResult = 2;
+			if (moveResult == -1) moveResult = 2;
 		}
 		
 		while (kbhit()) {
