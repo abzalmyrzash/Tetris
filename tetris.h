@@ -30,7 +30,7 @@ typedef struct {
 	int8_t y;
 } Piece;
 
-#define HEIGHT 40
+#define HEIGHT 20
 #define WIDTH 10
 
 #define EMPTY '.'
@@ -38,13 +38,17 @@ typedef struct {
 #define NONE -1
 
 typedef struct {
-	char grid[40][10];
+	char grid[HEIGHT][WIDTH];
 	Piece curPiece;
 	PieceType nextPieceType;
 	PieceType holdType;
 	bool canHold;
+	bool onGround;
 	bool over;
 	unsigned int score;
+	int fallTime;
+	int lockDelay;
+	int frameDelay;
 } Game;
 
 typedef enum: int8_t {
@@ -92,3 +96,7 @@ void clearLines(uint8_t lines, Game* game);
 void gravity(uint8_t lines, Game* game);
 
 void holdPiece(Game* game);
+
+void lockPiece(Game* game);
+
+void refreshScreen(Game* game);

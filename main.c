@@ -11,57 +11,6 @@
 
 #define CLOCKS_PER_MSEC (CLOCKS_PER_SEC / 1000)
 
-void refreshScreen(Game* game)
-{
-    HANDLE hOut;
-    COORD Position;
-
-    hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-
-	setCursor(0, 0);
-
-	uint16_t pieceGrid = pieceGrids[game->nextPieceType][0];
-
-	for (int i = 3; i >= 0; i--) {
-		setCursor(3, i);
-		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				printf("%c", BLOCK);
-			} else {
-				printf(".");
-			}
-			pieceGrid >>= 1;
-		}
-	}
-
-	setCursor (20, 4);
-	printf("HOLD");
-	if (game->holdType == NONE) pieceGrid = 0;
-	else pieceGrid = pieceGrids[game->holdType][0];
-
-	for (int i = 3; i >= 0; i--) {
-		setCursor(20, i + 5);
-		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				printf("%c", BLOCK);
-			} else {
-				printf(".");
-			}
-			pieceGrid >>= 1;
-		}
-	}
-
-	setCursor(0, 5);
-
-	printGrid(game);
-	printf("SCORE: %d\n", game->score);
-
-	if (game->over) {
-		printf("GAME OVER!\n");
-	}
-	fflush(stdout);
-}
-
 int main() {
 	srand(time(NULL));
 	CONSOLE_FONT_INFOEX originalFont;
@@ -73,93 +22,82 @@ int main() {
 	initGame(&game);
 
 	int moveResult;
-	int fallTime = 200;
-	int delay = 10;
 	system("cls");
 
 	refreshScreen(&game);
 	clock_t lastFall = clock();
 
 	while (!game.over) {
-		// clear piece
 		clearPieceFromGrid(&game);
 		
 		moveResult = 0;
 
-		if ((clock() - lastFall) / CLOCKS_PER_MSEC >= fallTime) {
+		int timeSinceLastFall = (clock() - lastFall) / CLOCKS_PER_MSEC;
+
+		if (timeSinceLastFall >= game.fallTime && !game.onGround) {
 			lastFall = clock();
 			moveResult = movePiece(DOWN, &game);
-			if (moveResult == -1) moveResult = 2;
 		}
-		
-		while (kbhit()) {
-			uint8_t c = getch();
 
-			if (c == ' ') {
-				moveResult = movePiece(SPACE, &game);
-			}
+		else if (timeSinceLastFall >= game.lockDelay && game.onGround) {
+			lastFall = clock();
+			lockPiece(&game);
+			continue;
+		}
 
-			else if (c == 27) {
-				goto quit;
-			}
+		else {
+			while (kbhit()) {
+				uint8_t c = getch();
 
-			else if (c == 'z' || c == 'Z') {
-				moveResult = rotatePiece(COUNTERCLOCKWISE, &game);
-			}
+				if (c == ' ') {
+					if (game.onGround) {
+						lockPiece(&game);
+						continue;
+					}
+					else moveResult = movePiece(SPACE, &game);
+				}
 
-			else if (c == 'c' || c == 'C') {
-				holdPiece(&game);
-			}
+				// Escape key
+				else if (c == 27) {
+					goto quit;
+				}
 
-			else if (c == 0 || c == 224) {
-				switch(getch())
-				{
-				case KEY_UP:
-					moveResult = rotatePiece(CLOCKWISE, &game);
-					break;
-				case KEY_DOWN:
-					moveResult = movePiece(DOWN, &game);
-					break;
-				case KEY_RIGHT:
-					moveResult = movePiece(RIGHT, &game);
-					break;
-				case KEY_LEFT:
-					moveResult = movePiece(LEFT, &game);
-					break;
-				default:
-					break;
+				else if (c == 'z' || c == 'Z') {
+					moveResult = rotatePiece(COUNTERCLOCKWISE, &game);
+				}
+
+				else if (c == 'c' || c == 'C') {
+					holdPiece(&game);
+				}
+
+				// arrow keys are two characters,
+				// where the first is one of these two values
+				// the second is one of the 4 values in the switch statement 
+				else if (c == 0 || c == 224) { 
+					switch(getch())
+					{
+					case KEY_UP:
+						moveResult = rotatePiece(CLOCKWISE, &game);
+						break;
+					case KEY_DOWN:
+						moveResult = movePiece(DOWN, &game);
+						break;
+					case KEY_LEFT:
+						moveResult = movePiece(LEFT, &game);
+						break;
+					case KEY_RIGHT:
+						moveResult = movePiece(RIGHT, &game);
+						break;
+					default:
+						break;
+					}
 				}
 			}
 		}
 
-		if (moveResult >= 1 || moveResult == -1) {
-			putPieceOnGrid(&game);
-			refreshScreen(&game);
-			Sleep(delay);
-
-			lastFall = clock();
-			if (moveResult != 2) continue;
-
-			uint8_t lines = checkLines(&game);
-			if (lines) {
-				markLines(lines, &game);
-				refreshScreen(&game);
-				Sleep(200);
-				clearLines(lines, &game);
-				Sleep(200);
-				gravity(lines, &game);
-				int cnt = popCount(lines);
-				game.score += 100 * cnt * cnt;
-			}
-
-			spawnNextPiece(&game);
-			game.canHold = true;
-		}
-
-		if (!putPieceOnGrid(&game)) game.over = true;
+		putPieceOnGrid(&game);
 		refreshScreen(&game);
-
-		Sleep(delay);
+		Sleep(game.frameDelay);
 	}
 	
 	while (getch() != 27);
@@ -168,4 +106,5 @@ int main() {
 	system("cls");
 	restoreConsoleFont(&originalFont);
 	setCursorVisibility(true);
+	return 0;
 }

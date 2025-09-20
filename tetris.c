@@ -1,6 +1,8 @@
 #include "tetris.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
+#include "console.h"
 
 uint16_t pieceGrids[NUM_BLOCK_TYPES][NUM_ROTATIONS] = 
 {
@@ -67,6 +69,9 @@ void initGame(Game* game)
 	game->canHold = true;
 	game->over = false;
 	game->score = 0;
+	game->fallTime = 200;
+	game->lockDelay = 1000;
+	game->frameDelay = 10;
 	
 	spawnNextPiece(game);
 	putPieceOnGrid(game);
@@ -224,6 +229,9 @@ loop:
 	if (dir == SPACE && result == 0) {
 		goto loop;
 	}
+
+	if (result == 1) game->onGround = true;
+	else game->onGround = false;
 	return result;
 }
 
@@ -322,4 +330,95 @@ void holdPiece(Game* game)
 		game->holdType = prevType;
 	}
 	game->canHold = false;
+}
+
+void lockPiece(Game* game)
+{
+	putPieceOnGrid(game);
+	uint8_t lines = checkLines(game);
+	if (lines) {
+		markLines(lines, game);
+		refreshScreen(game);
+		Sleep(200);
+		clearLines(lines, game);
+		Sleep(200);
+		gravity(lines, game);
+		int cnt = popCount(lines);
+		game->score += 100 * cnt * cnt;
+	}
+
+	spawnNextPiece(game);
+	game->canHold = true;
+
+	game->onGround = false;
+	uint16_t pieceGrid = pieceGrids[game->curPiece.type][0];
+	for (int i = 0; i < 4; i++) {
+		int y = game->curPiece.y + i;
+		for (int j = 0; j < 4; j++) {
+			if (pieceGrid & 1) {
+				int x = game->curPiece.x + j;
+				if (game->grid[y-1][x] != EMPTY) {
+					game->onGround = true;
+					break;
+				}
+			}
+			pieceGrid >>= 1;
+		}
+		if (game->onGround) break;
+	}
+
+	if (!putPieceOnGrid(game)) game->over = true;
+
+	refreshScreen(game);
+	Sleep(game->frameDelay);
+}
+
+void refreshScreen(Game* game)
+{
+    HANDLE hOut;
+    COORD Position;
+
+    hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	setCursor(0, 0);
+
+	uint16_t pieceGrid = pieceGrids[game->nextPieceType][0];
+
+	for (int i = 3; i >= 0; i--) {
+		setCursor(3, i);
+		for (int j = 0; j < 4; j++) {
+			if (pieceGrid & 1) {
+				printf("%c", BLOCK);
+			} else {
+				printf(".");
+			}
+			pieceGrid >>= 1;
+		}
+	}
+
+	setCursor (20, 4);
+	printf("HOLD");
+	if (game->holdType == NONE) pieceGrid = 0;
+	else pieceGrid = pieceGrids[game->holdType][0];
+
+	for (int i = 3; i >= 0; i--) {
+		setCursor(20, i + 5);
+		for (int j = 0; j < 4; j++) {
+			if (pieceGrid & 1) {
+				printf("%c", BLOCK);
+			} else {
+				printf(".");
+			}
+			pieceGrid >>= 1;
+		}
+	}
+
+	setCursor(0, 5);
+
+	printGrid(game);
+	printf("SCORE: %d\n", game->score);
+
+	if (game->over) {
+		printf("GAME OVER!\n");
+	}
 }
