@@ -48,6 +48,7 @@ typedef struct {
 	PieceType holdType;
 	bool canHold;
 	bool onGround;
+	bool locked;
 	bool over;
 	unsigned int score;
 	int fallTime;

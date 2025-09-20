@@ -67,6 +67,7 @@ void initGame(Game* game)
 	game->nextPieceType = rand() % NUM_BLOCK_TYPES;
 	game->holdType = NONE;
 	game->canHold = true;
+	game->locked = false;
 	game->over = false;
 	game->score = 0;
 	game->fallTime = 200;
@@ -312,14 +313,14 @@ void clearPieceFromGrid(Game* game)
 
 void printGrid(Game* game)
 {
-	putPieceOnGrid(game);
+	if (!game->locked) putPieceOnGrid(game);
 	for (int y = HEIGHT - 1; y >= 0; y--) {
 		for (int x = 0; x < WIDTH; x++) {
 			printf("%c", game->grid[y][x]);
 		}
 		printf("\n");
 	}
-	clearPieceFromGrid(game);
+	if (!game->locked) clearPieceFromGrid(game);
 }
 
 void holdPiece(Game* game)
@@ -340,6 +341,7 @@ void holdPiece(Game* game)
 
 void lockPiece(Game* game)
 {
+	game->locked = true;
 	putPieceOnGrid(game);
 	uint8_t lines = checkLines(game);
 	if (lines) {
@@ -347,16 +349,16 @@ void lockPiece(Game* game)
 		refreshScreen(game);
 		Sleep(200);
 		clearLines(lines, game);
+		refreshScreen(game);
 		Sleep(200);
 		gravity(lines, game);
 		int cnt = popCount(lines);
 		game->score += 100 * cnt * cnt;
 	}
+	game->locked = false;
 
 	spawnNextPiece(game);
 	game->canHold = true;
-
-	clearPieceFromGrid(game);
 
 	refreshScreen(game);
 	Sleep(game->frameDelay);
