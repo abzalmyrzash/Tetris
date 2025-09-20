@@ -42,8 +42,9 @@ typedef struct {
 	Piece curPiece;
 	PieceType nextPieceType;
 	PieceType holdType;
-	unsigned int score;
+	bool canHold;
 	bool over;
+	unsigned int score;
 } Game;
 
 typedef enum: int8_t {

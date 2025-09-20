@@ -79,7 +79,6 @@ int main() {
 
 	refreshScreen(&game);
 	clock_t lastFall = clock();
-	bool hitGround;
 
 	while (!game.over) {
 		// clear piece
@@ -154,7 +153,7 @@ int main() {
 			}
 
 			spawnNextPiece(&game);
-			hitGround = false;
+			game.canHold = true;
 		}
 
 		if (!putPieceOnGrid(&game)) game.over = true;

@@ -64,8 +64,9 @@ void initGame(Game* game)
 	}
 	game->nextPieceType = rand() % NUM_BLOCK_TYPES;
 	game->holdType = NONE;
-	game->score = 0;
+	game->canHold = true;
 	game->over = false;
+	game->score = 0;
 	
 	spawnNextPiece(game);
 	putPieceOnGrid(game);
@@ -309,6 +310,8 @@ void printGrid(Game* game)
 
 void holdPiece(Game* game)
 {
+	if (game->canHold == false) return;
+
 	if (game->holdType == NONE) {
 		game->holdType = game->curPiece.type;
 		spawnNextPiece(game);
@@ -318,4 +321,5 @@ void holdPiece(Game* game)
 		spawnPiece(game->holdType, game);
 		game->holdType = prevType;
 	}
+	game->canHold = false;
 }
