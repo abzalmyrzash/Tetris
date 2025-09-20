@@ -133,6 +133,9 @@ int rotatePiece(RotationDirection dir, Game* game)
 	
 	game->curPiece.rotation = rotation;
 
+	if (result == 1) game->onGround = true;
+	else game->onGround = false;
+
 	return result;
 }
 
