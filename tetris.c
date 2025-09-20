@@ -83,6 +83,11 @@ void spawnPiece(PieceType type, Game* game)
 	game->curPiece.rotation = R_NORMAL;
 	game->curPiece.x = 3;
 	game->curPiece.y = HEIGHT - 3;
+
+	PosState pos = getPosState(3, HEIGHT - 3, R_NORMAL, game);
+	if (pos == POS_INVALID) game->over = true;
+	else if (pos == POS_GROUND) game->onGround = true;
+	else game->onGround = false;
 }
 
 void getNextPieceType(Game* game)
@@ -96,7 +101,33 @@ void spawnNextPiece(Game* game)
 	getNextPieceType(game);
 }
 
-int rotatePiece(RotationDirection dir, Game* game)
+bool outOfBounds(int8_t x, int8_t y)
+{
+	return x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT;
+}
+
+PosState getPosState(int8_t pieceX, int8_t pieceY, Rotation rotation, Game* game)
+{
+	int8_t x, y;
+	uint16_t pieceGrid = pieceGrids[game->curPiece.type][rotation];
+	int result;
+	for (int i = 0; i < 4; i++) {
+		y = pieceY + i;
+		for (int j = 0; j < 4; j++) {
+			if (pieceGrid & 1) {
+				x = pieceX + j;
+				if (outOfBounds(x, y)) return POS_INVALID;
+				if (game->grid[y][x] != EMPTY) return POS_INVALID;
+				if (y == 0) result = POS_GROUND;
+				if (game->grid[y - 1][x] != EMPTY) result = POS_GROUND;
+			}
+			pieceGrid >>= 1;
+		}
+	}
+	return result;
+}
+
+PosState rotatePiece(RotationDirection dir, Game* game)
 {
 	Rotation rotation = game->curPiece.rotation;
 	if (dir == CLOCKWISE) {
@@ -111,81 +142,22 @@ int rotatePiece(RotationDirection dir, Game* game)
 		}
 	}
 
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][rotation];
-	int8_t x, y;
-	int8_t pieceX = game->curPiece.x;
-	int8_t pieceY = game->curPiece.y;
-	int result = 0;
-
-	for (int i = 0; i < 4; i++) {
-		y = pieceY + i;
-		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				x = pieceX + j;
-				if (outOfBounds(x, y)) return -1;
-				if (game->grid[y][x] != EMPTY) return -1;
-				if (y == 0) result = 1;
-				if (game->grid[y - 1][x] != EMPTY) result = 1;
-			}
-			pieceGrid >>= 1;
-		}
-	}
-	
-	game->curPiece.rotation = rotation;
-
-	if (result == 1) game->onGround = true;
-	else game->onGround = false;
-
-	return result;
-}
-
-bool putPieceOnGrid(Game* game)
-{
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
-	int8_t pieceY = game->curPiece.y;
-	int8_t pieceX = game->curPiece.x;
-	for (int8_t i = 0; i < 4; i++) {
-		int8_t y = pieceY + i;
-		for (int8_t j = 0; j < 4; j++) {
-			int8_t x = pieceX + j;
-			if (pieceGrid & 1) {
-				if (game->grid[y][x] != EMPTY) return false;
-				game->grid[y][x] = '\xB2';
-			}
-			pieceGrid >>= 1;
-		}
-	}
-	return true;
-}
-
-void clearPieceFromGrid(Game* game)
-{
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
-	int8_t pieceY = game->curPiece.y;
-	int8_t pieceX = game->curPiece.x;
-	for (int8_t i = 0; i < 4; i++) {
-		int8_t y = pieceY + i;
-		for (int8_t j = 0; j < 4; j++) {
-			int8_t x = pieceX + j;
-			if (pieceGrid & 1) {
-				game->grid[y][x] = EMPTY;
-			}
-			pieceGrid >>= 1;
-		}
+	PosState result = getPosState(game->curPiece.x, game->curPiece.y, rotation, game);
+	if (result == POS_INVALID) return result;
+	else {
+		game->curPiece.rotation = rotation;
+		if (result == 1) game->onGround = true;
+		else game->onGround = false;
+		return result;
 	}
 }
 
-bool outOfBounds(int8_t x, int8_t y)
-{
-	return x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT;
-}
-
-int movePiece(MoveDirection dir, Game* game)
+PosState movePiece(MoveDirection dir, Game* game)
 {
 	int8_t pieceX, pieceY;
 	uint16_t pieceGrid;
 	int8_t x, y;
-	int result;
+	PosState result;
 
 loop:
 	switch(dir)
@@ -211,26 +183,19 @@ loop:
 	
 	x, y;
 	result = 0;
-	pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
 
-	for (int8_t i = 0; i < 4; i++) {
-		y = pieceY + i;
-		for (int8_t j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				x = pieceX + j;
-				if (outOfBounds(x, y)) return -1;
-				if (game->grid[y][x] != EMPTY) return -1;
-				if (y == 0) result = 1;
-				if (game->grid[y - 1][x] != EMPTY) result = 1;
-			}
-			pieceGrid >>= 1;
+	result = getPosState(pieceX, pieceY, game->curPiece.rotation, game);
+	if (result == POS_INVALID) return result;
+	else {
+		game->curPiece.x = pieceX;
+		game->curPiece.y = pieceY;
+		if (dir == SPACE && result == 0) {
+			goto loop;
 		}
-	}
 
-	game->curPiece.x = pieceX;
-	game->curPiece.y = pieceY;
-	if (dir == SPACE && result == 0) {
-		goto loop;
+		if (result == 1) game->onGround = true;
+		else game->onGround = false;
+		return result;
 	}
 
 	if (result == 1) game->onGround = true;
@@ -309,14 +274,52 @@ void gravity(uint8_t lines, Game* game) {
 	}
 }
 
+bool putPieceOnGrid(Game* game)
+{
+	uint16_t pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
+	int8_t pieceY = game->curPiece.y;
+	int8_t pieceX = game->curPiece.x;
+	for (int8_t i = 0; i < 4; i++) {
+		int8_t y = pieceY + i;
+		for (int8_t j = 0; j < 4; j++) {
+			int8_t x = pieceX + j;
+			if (pieceGrid & 1) {
+				if (game->grid[y][x] != EMPTY) return false;
+				game->grid[y][x] = '\xB2';
+			}
+			pieceGrid >>= 1;
+		}
+	}
+	return true;
+}
+
+void clearPieceFromGrid(Game* game)
+{
+	uint16_t pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
+	int8_t pieceY = game->curPiece.y;
+	int8_t pieceX = game->curPiece.x;
+	for (int8_t i = 0; i < 4; i++) {
+		int8_t y = pieceY + i;
+		for (int8_t j = 0; j < 4; j++) {
+			int8_t x = pieceX + j;
+			if (pieceGrid & 1) {
+				game->grid[y][x] = EMPTY;
+			}
+			pieceGrid >>= 1;
+		}
+	}
+}
+
 void printGrid(Game* game)
 {
+	putPieceOnGrid(game);
 	for (int y = HEIGHT - 1; y >= 0; y--) {
 		for (int x = 0; x < WIDTH; x++) {
 			printf("%c", game->grid[y][x]);
 		}
 		printf("\n");
 	}
+	clearPieceFromGrid(game);
 }
 
 void holdPiece(Game* game)
@@ -353,24 +356,7 @@ void lockPiece(Game* game)
 	spawnNextPiece(game);
 	game->canHold = true;
 
-	game->onGround = false;
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][0];
-	for (int i = 0; i < 4; i++) {
-		int y = game->curPiece.y + i;
-		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				int x = game->curPiece.x + j;
-				if (game->grid[y-1][x] != EMPTY) {
-					game->onGround = true;
-					break;
-				}
-			}
-			pieceGrid >>= 1;
-		}
-		if (game->onGround) break;
-	}
-
-	if (!putPieceOnGrid(game)) game->over = true;
+	clearPieceFromGrid(game);
 
 	refreshScreen(game);
 	Sleep(game->frameDelay);

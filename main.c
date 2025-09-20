@@ -28,8 +28,6 @@ int main() {
 	clock_t lastFall = clock();
 
 	while (!game.over) {
-		clearPieceFromGrid(&game);
-		
 		moveResult = 0;
 
 		int timeSinceLastFall = (clock() - lastFall) / CLOCKS_PER_MSEC;
@@ -95,7 +93,6 @@ int main() {
 			}
 		}
 
-		putPieceOnGrid(&game);
 		refreshScreen(&game);
 		Sleep(game.frameDelay);
 	}

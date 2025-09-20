@@ -13,8 +13,6 @@ typedef enum : int8_t {
 	NUM_BLOCK_TYPES
 } PieceType;
 
-// square
-
 typedef enum: int8_t {
 	R_NORMAL,
 	R_90_DEG,
@@ -22,6 +20,12 @@ typedef enum: int8_t {
 	R_270_DEG,
 	NUM_ROTATIONS
 } Rotation;
+
+typedef enum: int8_t {
+	POS_INVALID = -1,
+	POS_FLOATING = 0,
+	POS_GROUND = 1
+} PosState;
 
 typedef struct {
 	PieceType type;
@@ -77,9 +81,11 @@ bool putPieceOnGrid(Game* game);
 
 void clearPieceFromGrid(Game* game);
 
-int rotatePiece(RotationDirection dir, Game* game);
+PosState getPosState(int8_t pieceX, int8_t pieceY, Rotation rotation, Game* game);
 
-int movePiece(MoveDirection dir, Game* game);
+PosState rotatePiece(RotationDirection dir, Game* game);
+
+PosState movePiece(MoveDirection dir, Game* game);
 
 void printGrid(Game* game);
 
