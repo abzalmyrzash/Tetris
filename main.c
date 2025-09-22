@@ -1,8 +1,10 @@
 #include <stdio.h>
-#include "tetris.h"
 #include <stdlib.h>
 #include <time.h>
+
+#include "tetris.h"
 #include "console.h"
+#include "time_util.h"
 
 #define KEY_UP 72
 #define KEY_DOWN 80
@@ -11,7 +13,16 @@
 
 #define CLOCKS_PER_MSEC (CLOCKS_PER_SEC / 1000)
 
+HANDLE hConsole;
+
+
 int main() {
+	hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+	HANDLE timer;
+	if(!(timer = CreateWaitableTimer(NULL, TRUE, NULL))) {
+		return -1;
+	}
+	
 	srand(time(NULL));
 	CONSOLE_FONT_INFOEX originalFont;
 	saveConsoleFont(&originalFont);
@@ -25,22 +36,34 @@ int main() {
 	system("cls");
 
 	refreshScreen(&game);
-	clock_t lastFall = clock();
+
+	HANDLE sleepTimer;
+    if(!(sleepTimer = CreateWaitableTimer(NULL, TRUE, NULL))) {
+		return -1;
+	}
+
+	ZenTimer_Init();
+	const int64_t zen_ticks_per_second = getZenTicksPerSecond();
+	const int64_t zen_ticks_per_microsecond = getZenTicksPerMicrosecond();
+	zen_timer_t frameTimer;
+	zen_timer_t timer1s = ZenTimer_Start();
+	int64_t frameTime = 0;
+	int64_t time1s = 0;
+	int fps = 0;
 
 	while (!game.over) {
+		frameTimer = ZenTimer_Start();
+
 		moveResult = 0;
 
-		int timeSinceLastFall = (clock() - lastFall) / CLOCKS_PER_MSEC;
-
-		if (timeSinceLastFall >= game.fallTime && !game.onGround) {
-			lastFall = clock();
+		if (game.ticksSinceLastFall >= game.fallTicks && !game.onGround) {
+			game.ticksSinceLastFall = 0;
 			moveResult = movePiece(DOWN, &game);
 		}
 
-		else if (timeSinceLastFall >= game.lockDelay && game.onGround) {
-			lastFall = clock();
+		else if (game.ticksSinceLastFall >= game.lockDelayTicks && game.onGround) {
 			lockPiece(&game);
-			continue;
+			game.ticksSinceLastFall = 0;
 		}
 
 		else {
@@ -50,9 +73,12 @@ int main() {
 				if (c == ' ') {
 					if (game.onGround) {
 						lockPiece(&game);
-						continue;
+						game.ticksSinceLastFall = 0;
 					}
-					else moveResult = movePiece(SPACE, &game);
+					else {
+						moveResult = movePiece(SPACE, &game);
+						game.ticksSinceLastFall = 0;
+					}
 				}
 
 				// Escape key
@@ -66,6 +92,7 @@ int main() {
 
 				else if (c == 'c' || c == 'C') {
 					holdPiece(&game);
+					game.ticksSinceLastFall = 0;
 				}
 
 				// arrow keys are two characters,
@@ -79,6 +106,9 @@ int main() {
 						break;
 					case KEY_DOWN:
 						moveResult = movePiece(DOWN, &game);
+						if (moveResult != POS_INVALID) {
+							game.ticksSinceLastFall = 0;
+						}
 						break;
 					case KEY_LEFT:
 						moveResult = movePiece(LEFT, &game);
@@ -94,7 +124,24 @@ int main() {
 		}
 
 		refreshScreen(&game);
-		Sleep(game.frameDelay);
+
+		time1s = ZenTimer_End(&timer1s);
+		fps++;
+		if (time1s >= 1e6) {
+			timer1s.start.QuadPart += zen_ticks_per_second;
+			game.fps = fps;
+			fps = 0;
+		}
+
+		frameTime += ZenTimer_End(&frameTimer);
+		if (frameTime < game.tickMicrosecs) {
+			frameTimer = ZenTimer_Start();
+			nanoSleep((game.tickMicrosecs - frameTime) * 10, timer); // 1 unit = 100 nanoseconds
+			frameTime += ZenTimer_End(&frameTimer);
+		}
+		frameTime -= game.tickMicrosecs;
+
+		game.ticksSinceLastFall++;
 	}
 	
 	while (getch() != 27);
@@ -103,5 +150,6 @@ int main() {
 	system("cls");
 	restoreConsoleFont(&originalFont);
 	setCursorVisibility(true);
+    CloseHandle(sleepTimer);
 	return 0;
 }

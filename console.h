@@ -3,6 +3,8 @@
 #include <conio.h>
 #include <stdbool.h>
 
+extern HANDLE hConsole;
+
 void setCursor(short x, short y);
 
 void getCursor(short *x, short *y);

@@ -2,18 +2,19 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <assert.h>
 #include "console.h"
 
-uint16_t pieceGrids[NUM_BLOCK_TYPES][NUM_ROTATIONS] = 
+uint16_t shapeGrids[NUM_PIECE_TYPES][NUM_ROTATIONS] = 
 {
-	// SQUARE
+	// O_SHAPE (SQUARE)
 	{
 		0b0000011001100000,
 		0b0000011001100000,
 		0b0000011001100000,
 		0b0000011001100000,
 	},
-	// LINE
+	// I_SHAPE (LINE)
 	{
 		0b0000111100000000,
 		0b0100010001000100,
@@ -59,47 +60,48 @@ uint16_t pieceGrids[NUM_BLOCK_TYPES][NUM_ROTATIONS] =
 
 void initGame(Game* game)
 {
-	for (int y = 40; y >= 0; y--) {
-		for (int x = 0 ; x < 10; x++) {
+	for (int y = HEIGHT - 1; y >= 0; y--) {
+		for (int x = 0; x < WIDTH; x++) {
 			game->grid[y][x] = '.';
 		}
 	}
-	game->nextPieceType = rand() % NUM_BLOCK_TYPES;
-	game->holdType = NONE;
+	game->nextShape = rand() % NUM_PIECE_TYPES;
+	game->holdShape = NONE;
 	game->canHold = true;
 	game->locked = false;
 	game->over = false;
 	game->score = 0;
-	game->fallTime = 200;
-	game->lockDelay = 1000;
-	game->frameDelay = 10;
+	game->fallTicks = 20;
+	game->lockDelayTicks = 100;
+	game->tickMicrosecs = 16667;
+	game->ticksSinceLastFall = 0;
+	game->fps = 0;
 	
 	spawnNextPiece(game);
-	putPieceOnGrid(game);
 }
 
-void spawnPiece(PieceType type, Game* game)
+void spawnPiece(Shape shape, Game* game)
 {
-	game->curPiece.type = type;
-	game->curPiece.rotation = R_NORMAL;
+	game->curPiece.shape = shape;
+	game->curPiece.orient = R_0_DEG;
 	game->curPiece.x = 3;
 	game->curPiece.y = HEIGHT - 3;
 
-	PosState pos = getPosState(3, HEIGHT - 3, R_NORMAL, game);
+	PosState pos = getCurrentPosState(game);
 	if (pos == POS_INVALID) game->over = true;
 	else if (pos == POS_GROUND) game->onGround = true;
 	else game->onGround = false;
 }
 
-void getNextPieceType(Game* game)
+void getNextShape(Game* game)
 {
-	game->nextPieceType = rand() % NUM_BLOCK_TYPES;
+	game->nextShape = rand() % NUM_PIECE_TYPES;
 }
 
 void spawnNextPiece(Game* game)
 {
-	spawnPiece(game->nextPieceType, game);
-	getNextPieceType(game);
+	spawnPiece(game->nextShape, game);
+	getNextShape(game);
 }
 
 bool outOfBounds(int8_t x, int8_t y)
@@ -107,56 +109,109 @@ bool outOfBounds(int8_t x, int8_t y)
 	return x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT;
 }
 
-PosState getPosState(int8_t pieceX, int8_t pieceY, Rotation rotation, Game* game)
+PosState getPosState(int8_t pieceX, int8_t pieceY, Orientation orient, Game* game)
 {
 	int8_t x, y;
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][rotation];
-	int result;
+	uint16_t shapeGrid = shapeGrids[game->curPiece.shape][orient];
+	int result = POS_FLOATING;
 	for (int i = 0; i < 4; i++) {
 		y = pieceY + i;
 		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
+			if (shapeGrid & 1) {
 				x = pieceX + j;
 				if (outOfBounds(x, y)) return POS_INVALID;
-				if (game->grid[y][x] != EMPTY) return POS_INVALID;
+				if (game->grid[y][x] == LOCKED_BLOCK) return POS_INVALID;
 				if (y == 0) result = POS_GROUND;
-				if (game->grid[y - 1][x] != EMPTY) result = POS_GROUND;
+				if (game->grid[y - 1][x] == LOCKED_BLOCK) result = POS_GROUND;
 			}
-			pieceGrid >>= 1;
+			shapeGrid >>= 1;
 		}
 	}
 	return result;
 }
 
+PosState getCurrentPosState(Game* game)
+{
+	return getPosState(game->curPiece.x, game->curPiece.y, game->curPiece.orient, game);
+}
+
 PosState rotatePiece(RotationDirection dir, Game* game)
 {
-	Rotation rotation = game->curPiece.rotation;
+	Shape shape = game->curPiece.shape;
+	if (shape == O_SHAPE) return getCurrentPosState(game);
+
+	Orientation orient = game->curPiece.orient;
+	Rotation rotation = (dir << 2) | orient;
+	
 	if (dir == CLOCKWISE) {
-		rotation++;
-		if (rotation == 4) {
-			rotation = R_NORMAL;
+		orient++;
+		if (orient == 4) {
+			orient = R_0_DEG;
 		}
 	} else {
-		rotation--;
-		if (rotation < 0) {
-			rotation = R_270_DEG;
+		orient--;
+		if (orient < 0) {
+			orient = R_270_DEG;
 		}
 	}
 
-	PosState result = getPosState(game->curPiece.x, game->curPiece.y, rotation, game);
-	if (result == POS_INVALID) return result;
-	else {
-		game->curPiece.rotation = rotation;
-		if (result == 1) game->onGround = true;
+	int x = game->curPiece.x, y = game->curPiece.y;
+
+	PosState result = getPosState(x, y, orient, game);
+	if (result != POS_INVALID) {
+		goto success;
+	}
+
+	static int8_t wallKick_I[8][4][2] = {
+		{ {-2,  0}, {+1,  0}, {-2, -1}, {+1, +2} }, // 0->R
+		{ {-1,  0}, {+2,  0}, {-1, +2}, {+2, -1} }, // R->2
+		{ {+2,  0}, {-1,  0}, {+2, +1}, {-1, -2} }, // 2->L
+		{ {+1,  0}, {-2,  0}, {+1, -2}, {-2, +1} }, // L->0
+		{ {-1,  0}, {+2,  0}, {-1, +2}, {+2, -1} }, // 0->L
+		{ {-2,  0}, {+1,  0}, {-2, -1}, {+1, +2} }, // L->2
+		{ {+1,  0}, {-2,  0}, {+1, -2}, {-2, +1} }, // 2->R
+		{ {+2,  0}, {-1,  0}, {+2, +1}, {-1, -2} }  // R->0
+	};
+
+	static int8_t wallKick_not_I[8][4][2] = {
+		{ {-1,  0}, {-1, +1}, { 0, -2}, {-1, -2} }, // 0->R
+		{ {+1,  0}, {+1, -1}, { 0, +2}, {+1, +2} }, // R->2
+		{ {+1,  0}, {+1, +1}, { 0, -2}, {+1, -2} }, // 2->L
+		{ {-1,  0}, {-1, -1}, { 0, +2}, {-1, +2} }, // L->0
+		{ { 0,  0}, {+1,  0}, {+1, +1}, { 0, -2} }, // 0->L
+		{ {-1,  0}, {-1, -1}, { 0, +2}, {-1, +2} }, // L->2
+		{ {-1,  0}, {-1, +1}, { 0, -2}, {-1, -2} }, // 2->R
+		{ {+1,  0}, {+1, -1}, { 0, +2}, {+1, +2} }  // R->0
+	};
+
+	int8_t (*wallKick)[4][2];
+	if (shape == I_SHAPE) wallKick = wallKick_I;
+	else wallKick = wallKick_not_I;
+
+	for (int i = 0; i < 4; i++) {
+		x = game->curPiece.x + wallKick[rotation][i][0];
+		y = game->curPiece.y + wallKick[rotation][i][1];
+		result = getPosState(x, y, orient, game);
+		if (result != POS_INVALID) {
+			game->curPiece.x = x;
+			game->curPiece.y = y;
+			goto success;
+		}
+	}
+
+	return POS_INVALID;
+	
+	success:
+		game->curPiece.orient = orient;
+		if (result == POS_GROUND) game->onGround = true;
 		else game->onGround = false;
 		return result;
-	}
 }
 
 PosState movePiece(MoveDirection dir, Game* game)
 {
 	int8_t pieceX, pieceY;
-	uint16_t pieceGrid;
+	uint16_t shapeGrid;
 	int8_t x, y;
 	PosState result;
 
@@ -185,7 +240,7 @@ loop:
 	x, y;
 	result = 0;
 
-	result = getPosState(pieceX, pieceY, game->curPiece.rotation, game);
+	result = getPosState(pieceX, pieceY, game->curPiece.orient, game);
 	if (result == POS_INVALID) return result;
 	else {
 		game->curPiece.x = pieceX;
@@ -194,12 +249,12 @@ loop:
 			goto loop;
 		}
 
-		if (result == 1) game->onGround = true;
+		if (result == POS_GROUND) game->onGround = true;
 		else game->onGround = false;
 		return result;
 	}
 
-	if (result == 1) game->onGround = true;
+	if (result == POS_GROUND) game->onGround = true;
 	else game->onGround = false;
 	return result;
 }
@@ -275,51 +330,40 @@ void gravity(uint8_t lines, Game* game) {
 	}
 }
 
-bool putPieceOnGrid(Game* game)
+void putPieceOnGrid(Game* game, char symbol)
 {
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
+	uint16_t shapeGrid = shapeGrids[game->curPiece.shape][game->curPiece.orient];
 	int8_t pieceY = game->curPiece.y;
 	int8_t pieceX = game->curPiece.x;
 	for (int8_t i = 0; i < 4; i++) {
 		int8_t y = pieceY + i;
 		for (int8_t j = 0; j < 4; j++) {
 			int8_t x = pieceX + j;
-			if (pieceGrid & 1) {
-				if (game->grid[y][x] != EMPTY) return false;
-				game->grid[y][x] = '\xB2';
+			if (shapeGrid & 1) {
+				game->grid[y][x] = symbol;
 			}
-			pieceGrid >>= 1;
+			shapeGrid >>= 1;
 		}
 	}
-	return true;
 }
 
 void clearPieceFromGrid(Game* game)
 {
-	uint16_t pieceGrid = pieceGrids[game->curPiece.type][game->curPiece.rotation];
-	int8_t pieceY = game->curPiece.y;
-	int8_t pieceX = game->curPiece.x;
-	for (int8_t i = 0; i < 4; i++) {
-		int8_t y = pieceY + i;
-		for (int8_t j = 0; j < 4; j++) {
-			int8_t x = pieceX + j;
-			if (pieceGrid & 1) {
-				game->grid[y][x] = EMPTY;
-			}
-			pieceGrid >>= 1;
-		}
-	}
+	putPieceOnGrid(game, EMPTY);
 }
 
-void printGrid(Game* game)
+void printGrid(Game* game, short x0, short y0)
 {
-	if (!game->locked) putPieceOnGrid(game);
-	for (int y = HEIGHT - 1; y >= 0; y--) {
-		for (int x = 0; x < WIDTH; x++) {
-			printf("%c", game->grid[y][x]);
-		}
-		printf("\n");
+	if (!game->locked) putPieceOnGrid(game, CUR_BLOCK);
+	COORD coord = {x0, y0};
+	DWORD written;
+	char c;
+	FILE* file = fopen("grid.txt", "w");
+	for (int8_t y = VISIBLE_HEIGHT - 1; y >= 0; y--) {
+		WriteConsoleOutputCharacter(hConsole, game->grid[y], WIDTH, coord, &written);
+		coord.Y++;
 	}
+	fclose(file);
 	if (!game->locked) clearPieceFromGrid(game);
 }
 
@@ -327,14 +371,14 @@ void holdPiece(Game* game)
 {
 	if (game->canHold == false) return;
 
-	if (game->holdType == NONE) {
-		game->holdType = game->curPiece.type;
+	if (game->holdShape == NONE) {
+		game->holdShape = game->curPiece.shape;
 		spawnNextPiece(game);
 	}
 	else {
-		PieceType prevType = game->curPiece.type;
-		spawnPiece(game->holdType, game);
-		game->holdType = prevType;
+		Shape prevShape = game->curPiece.shape;
+		spawnPiece(game->holdShape, game);
+		game->holdShape = prevShape;
 	}
 	game->canHold = false;
 }
@@ -342,7 +386,7 @@ void holdPiece(Game* game)
 void lockPiece(Game* game)
 {
 	game->locked = true;
-	putPieceOnGrid(game);
+	putPieceOnGrid(game, LOCKED_BLOCK);
 	uint8_t lines = checkLines(game);
 	if (lines) {
 		markLines(lines, game);
@@ -359,57 +403,80 @@ void lockPiece(Game* game)
 
 	spawnNextPiece(game);
 	game->canHold = true;
-
-	refreshScreen(game);
-	Sleep(game->frameDelay);
 }
 
 void refreshScreen(Game* game)
 {
-    HANDLE hOut;
-    COORD Position;
+    COORD coord;
 
-    hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-
-	setCursor(0, 0);
-
-	uint16_t pieceGrid = pieceGrids[game->nextPieceType][0];
+	uint16_t shapeGrid = shapeGrids[game->nextShape][0];
+	DWORD written;
+	char c;
 
 	for (int i = 3; i >= 0; i--) {
-		setCursor(3, i);
+		coord.Y = i;
 		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				printf("%c", BLOCK);
+			coord.X = 3 + j;
+			if (shapeGrid & 1) {
+				c = LOCKED_BLOCK;
+				// printf("%c", LOCKED_BLOCK);
 			} else {
-				printf(".");
+				c = EMPTY;
+				//printf(".");
 			}
-			pieceGrid >>= 1;
+			WriteConsoleOutputCharacter(hConsole, &c, 1, coord, &written);
+			shapeGrid >>= 1;
 		}
 	}
 
-	setCursor (20, 4);
-	printf("HOLD");
-	if (game->holdType == NONE) pieceGrid = 0;
-	else pieceGrid = pieceGrids[game->holdType][0];
+	coord.Y = 4;
+	coord.X = 20;
+	WriteConsoleOutputCharacter(hConsole, "HOLD", 4, coord, &written);
+	if (game->holdShape == NONE) shapeGrid = 0;
+	else shapeGrid = shapeGrids[game->holdShape][0];
 
 	for (int i = 3; i >= 0; i--) {
-		setCursor(20, i + 5);
+		coord.Y = i + 5;
 		for (int j = 0; j < 4; j++) {
-			if (pieceGrid & 1) {
-				printf("%c", BLOCK);
+			coord.X = 20 + j;
+			if (shapeGrid & 1) {
+				//printf("%c", LOCKED_BLOCK);
+				c = LOCKED_BLOCK;
 			} else {
-				printf(".");
+				//printf(".");
+				c = EMPTY;
 			}
-			pieceGrid >>= 1;
+			WriteConsoleOutputCharacter(hConsole, &c, 1, coord, &written);
+			shapeGrid >>= 1;
 		}
 	}
 
-	setCursor(0, 5);
+	printGrid(game, 0, 5);
 
-	printGrid(game);
-	printf("SCORE: %d\n", game->score);
+	coord.Y = VISIBLE_HEIGHT + 5;
+	coord.X = 0;
+	WriteConsoleOutputCharacter(hConsole, "SCORE:", 6, coord, &written);
+
+	coord.X = 7;
+	char score[10];
+	static int scoreLen = 0;
+	WriteConsoleOutputCharacter(hConsole, "          ", scoreLen, coord, &written);
+	scoreLen = sprintf(score, "%d", game->score);
+	WriteConsoleOutputCharacter(hConsole, score, scoreLen, coord, &written);
+
+	coord.X = 20;
+	WriteConsoleOutputCharacter(hConsole, "FPS:", 4, coord, &written);
+
+	coord.X = 25;
+	char fps[10];
+	static int fpsLen = 0;
+	WriteConsoleOutputCharacter(hConsole, "          ", fpsLen, coord, &written);
+	fpsLen = sprintf(fps, "%d", game->fps);
+	WriteConsoleOutputCharacter(hConsole, fps, fpsLen, coord, &written);
 
 	if (game->over) {
-		printf("GAME OVER!\n");
+		coord.X = 0;
+		coord.Y++;
+		WriteConsoleOutputCharacter(hConsole, "GAME OVER!", 10, coord, &written);
 	}
 }
