@@ -248,10 +248,6 @@ loop:
 		if (dir == SPACE && result == 0) {
 			goto loop;
 		}
-
-		if (result == POS_GROUND) game->onGround = true;
-		else game->onGround = false;
-		return result;
 	}
 
 	if (result == POS_GROUND) game->onGround = true;
