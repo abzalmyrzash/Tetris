@@ -307,22 +307,23 @@ void clearLines(uint8_t lines, Game* game) {
 }
 
 void gravity(uint8_t lines, Game* game) {
-	for (int i = 0; i < 4; i++) {
-		int consecutive = 0;
-		while(lines & 1) {
-			lines >>= 1;
-			consecutive++;
-		}
-		lines >>= 1;
-		if (consecutive == 0) continue;
-
-		int y0 = game->curPiece.y + i;
-		for (int y = y0 + consecutive; y < HEIGHT; y++) {
+	int cleared = 0;
+	int y = game->curPiece.y;
+	while (lines) {
+		if (lines & 1) cleared++;
+		else if (cleared > 0) {
 			for (int x = 0; x < WIDTH; x++) {
-				game->grid[y - consecutive][x] = game->grid[y][x];
+				game->grid[y - cleared][x] = game->grid[y][x];
 			}
 		}
-		i += consecutive;
+		lines >>= 1;
+		y++;
+	}
+
+	for (; y < HEIGHT; y++) {
+		for (int x = 0; x < WIDTH; x++) {
+			game->grid[y - cleared][x] = game->grid[y][x];
+		}
 	}
 }
 
